@@ -30,3 +30,24 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/
+build/
+package-lock.json
+yarn.lock
+
+# System
+.DS_Store
+
+# Project Specific
+bmlquery.db
+bmlquery-backend
+out.log
+*.log
+
+# Editor
+.idea/
+.vscode/

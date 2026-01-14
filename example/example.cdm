@@ -1,0 +1,163 @@
+# ==============================================================================
+var $args =
+  mid             : 'm1'
+  plantId         : 'SYHI5OY7RAIGBBYOYVQOCOC7JMCNC4RPP'
+  originTopologyId: 'SXLJJIKPLVUJCXTECSEDEBIV44ATMJFMB'
+  cloneTopologyId : 'SXZVZXTYVQ557P2RZOXMWXVSMCDSKMJ72'
+var $op_result = $$.mlResult
+# ==============================================================================
+
+var $result = ApiProlog('CloneTopologyDataset', $args, $op_result)
+var $startTime = Now()
+
+var $mid = valueof $args.mid defto 'CloneTopologyDataset'
+logInfo = '# [ApiTracking] : '+$mid+':CloneTopologyDataset:START >>'
+
+var $input        = MLP.newMl()
+var $mapList      = MLP.newMl()
+var $responseData = MLP.newMl()
+
+var $debug            = valueof $args.debug               defto false
+var $plantId          = valueof $args.targetPlantId       defto 'UNKNOWN'
+var $originTopologyId = valueof $args.originTopologyId    defto 'UNKNOWN'
+var $cloneTopologyId  = valueof $args.cloneTopologyId     defto 'UNKNOWN'
+
+var $newIdMap         = valueof $args.newIdMap            defto MLP.newMl()
+var $originBoxMapList = valueof $args.originBoxMapList    defto MLP.newMl()
+var $cloneBoxMapList  = valueof $args.cloneBoxMapList     defto MLP.newMl()
+
+var $historyModels =
+  WaterInflowHistory   : true
+  WaterOutflowHistory  : true
+  WaterEmbodiedHistory : true
+  WaterLossHistory     : true
+
+  EnergyInflowHistory  : false
+  EnergyOutflowHistory : false
+  EnergyEmbodiedHistory: false
+  EnergyLossHistory    : false
+
+  WaterGeneratedHistory: true
+  WaterReuseHistory    : true
+  AnalyticHistory      : true
+
+if (useof $args.newIdMap == undefined):
+  $input.clearImp()
+  $input.as               = "$none:$none:$none"
+  $input.only             = "id,sysData"
+  $input.limit            = 1
+  $input.PlantTopology.id = $cloneTopologyId
+  var $clonePlantData = ComputeQueryImp($input).Data    
+  if (useof $clonePlantData.sysData == undefined):
+    discard(code: COPY-TOPOLOGY-DATA-ERROR, message: 'Source Topology not found')
+  $newIdMap = valueof $clonePlantData.sysData defto MLP.newMl()
+
+# Check data box mapping
+if (useof $args.originBoxMapList == undefined):
+  $input.clearImp()
+  $input.recordSource = 'Tool'
+  $input.plantId      = $plantId
+  $input.topologyId   = $originTopologyId
+  var $originCompIDList = GetComponentIDList($input)
+  $originBoxMapList = valueof $originCompIDList.ConnectionInfo.ComponentDataBoxIDList defto MLP.newMl()
+
+if (useof $args.cloneBoxMapList == undefined):
+  $input.clearImp()
+  $input.recordSource = 'Tool'
+  $input.plantId      = $plantId
+  $input.topologyId   = $cloneTopologyId
+  var $cloneCompIDList = GetComponentIDList($input)
+  $cloneBoxMapList = valueof $cloneCompIDList.ConnectionInfo.ComponentDataBoxIDList defto MLP.newMl()
+
+var $inflowIdList  = $newIdMap.INFLOW.listKeysFirst()
+var $outflowIdList = $newIdMap.OUTFLOW.listKeysFirst()
+var $targetIdArray = new('java.util.ArrayList')
+
+foreach (key: var $key, value: var $value, in:, from: $originBoxMapList):
+  if (useof $value.historyTargetId == undefined):
+    continue
+  if (useof $newIdMap.($key) == undefined):
+    add $result.INVALID = 'OLD-'+$key
+    continue
+
+  var $pairKey = valueof $newIdMap.($key) defto 'UNKNOWN'
+
+  var $targetId = valueof $value.historyTargetId defto 'UNKNOWN'
+  if (!$targetIdArray.contains($targetId)):
+    $targetIdArray.add($targetId)
+
+  if (useof $cloneBoxMapList.($pairKey) == undefined):
+    add $result.INVALID = 'NEW-'+$pairKey
+    continue
+
+  var $pairTarget = valueof $cloneBoxMapList.($pairKey).historyTargetId defto 'UNKNOWN'
+  if (useof $newIdMap.($targetId) == undefined):
+    $newIdMap.($targetId) = $pairTarget
+
+var $targetIdList = strJoin(',', $targetIdArray)
+var $batchData    = MLP.newMl()
+
+foreach (key: var $modelName, value: var $isWaterType, in:, from: $historyModels):
+  var $funcName = ''
+  var $subKey   = ''
+  var $flowKey  = ''
+
+  if ($isWaterType):
+    $funcName = 'AggregateWaterHistory'
+    $subKey   = 'WaterRecord'
+    $flowKey  = 'waterFlowIds'
+  else:
+    $funcName = 'AggregateEnergyHistory'
+    $subKey   = 'EnergyRecord'
+    $flowKey  = 'energyFlowIds'
+
+  # logInfo = '[CloneTopologyDataset] modelName: '+$modelName
+  # logError = '[CloneTopologyDataset] targetIdList: '+$targetIdList
+
+  $input.clearImp()
+  $input.($flowKey)    = $targetIdList
+  $input.historyType   = $modelName
+  $input.aggregateMode = 'year' # should be date, lets it year for debug
+  var $agResult = ($funcName)($input).AggregateData
+  $result.remove($funcName)
+
+  $result.REQUEST.($modelName)  = $input.deepClone().content()
+  $result.RESPONSE.($modelName) = $agResult.deepClone().content()
+
+  # if ($useof $agResult.Aggregate != undefined):
+  #   logError = '[CloneTopologyDataset] agResult:\n'+$agResult
+
+  foreach (value: var $aggValue, in: Aggregate, from: $agResult):
+    var $year  = valueof $aggValue.yearNumber   defto 2024
+    var $month = valueof $aggValue.monthNumber  defto 1
+    var $day   = valueof $aggValue.dayNumber    defto 1
+
+    var $dateString = $year+'-'+$month+'-'+$day+'T00:00:00.000Z'
+    var $dateLong   = datetimeXSD($dateString)
+
+    var $cloneRecord = MLP.newMl()
+    $cloneRecord.sourceId                          = valueof $newIdMap.($aggValue.boxId)      defto ('MISSING SOURCE '+ valueof $aggValue.sourceId defto 'UNKNOWN')
+    $cloneRecord.target                            = valueof $newIdMap.($aggValue.flowId)     defto ('MISSING TARGET '+ valueof $aggValue.target   defto 'UNKNOWN')
+    $cloneRecord.owner                             = valueof $C.data.orgId                    defto 'Atomiton'
+    # $cloneRecord.($subKey).QuantityParams.quantity = valueof $aggValue.total                  defto Double(0)
+    $cloneRecord.($subKey).QuantityParams.quantity = Double(0)
+    $cloneRecord.($subKey).QuantityParams.unit     = valueof $aggValue.unit                   defto 'UNKNOWN'
+    $cloneRecord.($subKey).recordSource            = valueof $aggValue.recordSource           defto 'Tool'
+    $cloneRecord.($subKey).recordDate.DateLong     = $dateLong
+    $cloneRecord.($subKey).recordDate.DateString   = $dateString
+
+    if ($isWaterType):
+      $cloneRecord.($subKey).Fidelity = valueof $aggValue.fidelity defto 'Manual'
+    else:
+      $cloneRecord.($subKey).groupNumber = '1'
+
+    add $batchData.($modelName) = $cloneRecord.deepClone().content()
+
+$result.Data = $batchData
+$result.MAP  = $newIdMap
+$result.BOX1 = $originBoxMapList
+$result.BOX2 = $cloneBoxMapList
+
+logInfo = '# [ApiTracking] : '+$mid+':CloneTopologyDataset:END <<'
+$result.LoadingTime = Now() - $startTime
+# ==============================================================================
