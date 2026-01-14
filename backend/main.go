@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"bmlquery-backend/db"
@@ -180,6 +181,228 @@ func getModelsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// Query CRUD Handlers
+
+func getQueriesHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	queries, err := db.GetAllQueries()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get queries: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(queries)
+}
+
+func getQueryHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	// Extract ID from URL path
+	idStr := strings.TrimPrefix(r.URL.Path, "/queries/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid query ID", http.StatusBadRequest)
+		return
+	}
+
+	query, err := db.GetQueryByID(id)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Query not found: %v", err), http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(query)
+}
+
+func createQueryHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var input struct {
+		Name        string `json:"name"`
+		QueryString string `json:"query_string"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	id, err := db.CreateQuery(input.Name, input.QueryString)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create query: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"id": id})
+}
+
+func updateQueryHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "PUT, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	if r.Method != http.MethodPut {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/queries/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid query ID", http.StatusBadRequest)
+		return
+	}
+
+	var input struct {
+		Name        string `json:"name"`
+		QueryString string `json:"query_string"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.UpdateQuery(id, input.Name, input.QueryString); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to update query: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"success": true}`))
+}
+
+func deleteQueryHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "DELETE, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	if r.Method != http.MethodDelete {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	idStr := strings.TrimPrefix(r.URL.Path, "/queries/")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid query ID", http.StatusBadRequest)
+		return
+	}
+
+	if err := db.DeleteQuery(id); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to delete query: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"success": true}`))
+}
+
+func parseQueryHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	if r.Method == http.MethodOptions {
+		return
+	}
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var input struct {
+		QueryString string `json:"query_string"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Remove the # header if present
+	queryStr := strings.TrimPrefix(strings.TrimSpace(input.QueryString), "#")
+	queryStr = strings.TrimSpace(queryStr)
+
+	// Parse YAML
+	var queryMap map[string]interface{}
+	if err := yaml.Unmarshal([]byte(queryStr), &queryMap); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse YAML: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Extract function, model, and filters
+	var function, model string
+	var filters []Filter
+
+	for funcName, funcValue := range queryMap {
+		function = funcName
+		if modelMap, ok := funcValue.(map[string]interface{}); ok {
+			for modelName, modelValue := range modelMap {
+				model = modelName
+				if attrMap, ok := modelValue.(map[string]interface{}); ok {
+					for attrName, attrValue := range attrMap {
+						if condMap, ok := attrValue.(map[string]interface{}); ok {
+							for condName, condValue := range condMap {
+								filters = append(filters, Filter{
+									Attribute:      attrName,
+									Condition:      condName,
+									ConditionValue: fmt.Sprintf("%v", condValue),
+								})
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	result := QueryInput{
+		Function: function,
+		Model:    model,
+		Filters:  filters,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
 func main() {
 	// Initialize DB
 	db.InitDB("bmlquery.db")
@@ -187,6 +410,42 @@ func main() {
 	http.HandleFunc("/generate", generateHandler)
 	http.HandleFunc("/load-schema", loadSchemaHandler)
 	http.HandleFunc("/models", getModelsHandler)
+
+	// Query management endpoints
+	http.HandleFunc("/queries", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getQueriesHandler(w, r)
+		} else if r.Method == http.MethodPost {
+			createQueryHandler(w, r)
+		} else if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			return
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	http.HandleFunc("/queries/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getQueryHandler(w, r)
+		} else if r.Method == http.MethodPut {
+			updateQueryHandler(w, r)
+		} else if r.Method == http.MethodDelete {
+			deleteQueryHandler(w, r)
+		} else if r.Method == http.MethodOptions {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			return
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+
+	http.HandleFunc("/parse-query", parseQueryHandler)
+
 	fmt.Println("Server starting on :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)

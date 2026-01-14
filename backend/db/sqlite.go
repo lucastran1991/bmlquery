@@ -40,10 +40,22 @@ func createTables() {
 		FOREIGN KEY(model_id) REFERENCES models(id)
 	);`
 
+	createQueriesTable := `
+	CREATE TABLE IF NOT EXISTS saved_queries (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL UNIQUE,
+		query_string TEXT NOT NULL,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);`
+
 	if _, err := DB.Exec(createModelsTable); err != nil {
 		log.Fatal(err)
 	}
 	if _, err := DB.Exec(createAttributesTable); err != nil {
+		log.Fatal(err)
+	}
+	if _, err := DB.Exec(createQueriesTable); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -103,4 +115,70 @@ func GetAllModelsWithAttributes() ([]ModelWithAttributes, error) {
 	})
 
 	return result, nil
+}
+
+// SavedQuery represents a stored query
+type SavedQuery struct {
+	ID          int    `json:"id"`
+	Name        string `json:"name"`
+	QueryString string `json:"query_string"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+type SavedQueryListItem struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// GetAllQueries returns list of all saved queries (id and name only)
+func GetAllQueries() ([]SavedQueryListItem, error) {
+	rows, err := DB.Query("SELECT id, name FROM saved_queries ORDER BY name")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	queries := make([]SavedQueryListItem, 0) // Initialize as empty slice instead of nil
+	for rows.Next() {
+		var q SavedQueryListItem
+		if err := rows.Scan(&q.ID, &q.Name); err != nil {
+			return nil, err
+		}
+		queries = append(queries, q)
+	}
+	return queries, nil
+}
+
+// GetQueryByID returns a specific saved query
+func GetQueryByID(id int) (*SavedQuery, error) {
+	var q SavedQuery
+	err := DB.QueryRow("SELECT id, name, query_string, created_at, updated_at FROM saved_queries WHERE id = ?", id).
+		Scan(&q.ID, &q.Name, &q.QueryString, &q.CreatedAt, &q.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return &q, nil
+}
+
+// CreateQuery creates a new saved query
+func CreateQuery(name, queryString string) (int64, error) {
+	result, err := DB.Exec("INSERT INTO saved_queries (name, query_string) VALUES (?, ?)", name, queryString)
+	if err != nil {
+		return 0, err
+	}
+	return result.LastInsertId()
+}
+
+// UpdateQuery updates an existing query
+func UpdateQuery(id int, name, queryString string) error {
+	_, err := DB.Exec("UPDATE saved_queries SET name = ?, query_string = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+		name, queryString, id)
+	return err
+}
+
+// DeleteQuery deletes a saved query
+func DeleteQuery(id int) error {
+	_, err := DB.Exec("DELETE FROM saved_queries WHERE id = ?", id)
+	return err
 }
